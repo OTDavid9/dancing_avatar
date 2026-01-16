@@ -2,8 +2,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
-import * as authSchema from "@shared/models/auth";
-import * as chatSchema from "@shared/models/chat";
 
 const { Pool } = pg;
 
@@ -17,9 +15,5 @@ export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 // Combine all schemas
 export const db = drizzle(pool, { 
-  schema: { 
-    ...schema, 
-    ...authSchema,
-    ...chatSchema 
-  } 
+  schema 
 });
