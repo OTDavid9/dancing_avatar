@@ -41,23 +41,20 @@ export default function Practice() {
   const handlePoseDetected = (pose: poseDetection.Pose) => {
     if (!isPlaying) return;
 
-    // MOCK SCORING LOGIC
-    // In a real app, this would compare pose vector similarity to video landmarks keyframe by keyframe
-    // Here we just check if enough keypoints are visible with high confidence
-    const visibleKeypoints = pose.keypoints.filter(kp => (kp.score || 0) > 0.6).length;
-    const accuracy = Math.min(100, Math.round((visibleKeypoints / 17) * 100)); // 17 is standard Blazepose keypoints
+    // SCORING LOGIC
+    const visibleKeypoints = pose.keypoints.filter(kp => (kp.score || 0) > 0.5).length;
+    const accuracy = Math.min(100, Math.round((visibleKeypoints / 17) * 100));
     
-    // Smooth score update
-    setScore(prev => Math.round((prev * 0.9) + (accuracy * 0.1)));
+    setScore(prev => Math.max(prev, accuracy));
 
-    // AI Feedback Trigger (Throttled in real app)
-    if (Math.random() > 0.98) {
+    // AI Feedback Trigger - lower threshold for testing
+    if (Math.random() > 0.95) {
        analyzeMotion({
          videoContext: `User practicing ${video?.title}`,
-         userPerformance: `Accuracy score ${accuracy}% with ${visibleKeypoints} visible joints`
+         userPerformance: `User is showing ${visibleKeypoints} keypoints with ${accuracy}% accuracy.`
        }, {
          onSuccess: (data) => {
-           setFeedback(data.feedback);
+           if (data.feedback) setFeedback(data.feedback);
          }
        });
     }
@@ -124,20 +121,12 @@ export default function Practice() {
       <main className="flex-1 flex relative">
         {/* Reference Video */}
         <div className="flex-1 bg-black relative flex items-center justify-center border-r border-white/10">
-          <video
-            ref={videoRef}
-            src={video.videoUrl}
-            className="w-full max-h-full object-contain"
-            loop
-            muted // Muted to avoid autoplay issues, allow user to unmute
+          <iframe
+            src={video.videoUrl.replace("watch?v=", "embed/") + "?autoplay=1&mute=1&enablejsapi=1"}
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
           />
-          {!isPlaying && (
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
-              <Button onClick={togglePlay} size="icon" className="h-20 w-20 rounded-full bg-white text-black hover:bg-white/90 hover:scale-105 transition-all">
-                <Play className="h-8 w-8 ml-1 fill-current" />
-              </Button>
-            </div>
-          )}
         </div>
 
         {/* User Camera */}
