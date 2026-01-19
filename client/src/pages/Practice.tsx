@@ -37,6 +37,7 @@ export default function Practice() {
   }, [video, analyzeMotion]);
 
   if (!video) return null;
+  const [isPlaying, setIsPlaying] = useState(false);
   const [score, setScore] = useState(0);
   const [feedback, setFeedback] = useState("Get ready to move!");
   const [sessionId, setSessionId] = useState<number | null>(null);
