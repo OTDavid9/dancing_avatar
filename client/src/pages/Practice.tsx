@@ -6,7 +6,7 @@ import { useStartPractice, useFinishPractice, useCoachingAnalysis } from "@/hook
 import { PoseCanvas } from "@/components/practice/PoseCanvas";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Play, Pause, RefreshCw, ChevronLeft } from "lucide-react";
+import { Play, Pause, RefreshCw, ChevronLeft, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import * as poseDetection from '@tensorflow-models/pose-detection';
 
