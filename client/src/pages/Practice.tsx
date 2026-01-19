@@ -47,11 +47,11 @@ export default function Practice() {
     
     setScore(prev => Math.max(prev, accuracy));
 
-    // AI Feedback Trigger - lower threshold for testing
-    if (Math.random() > 0.95) {
+    // AI Feedback Trigger - significantly more frequent for "synchronization" feel
+    if (Math.random() > 0.90) {
        analyzeMotion({
          videoContext: `User practicing ${video?.title}`,
-         userPerformance: `User is showing ${visibleKeypoints} keypoints with ${accuracy}% accuracy.`
+         userPerformance: `Accuracy score ${accuracy}% with ${visibleKeypoints} visible joints. The user is attempting to synchronize with the moves.`
        }, {
          onSuccess: (data) => {
            if (data.feedback) setFeedback(data.feedback);

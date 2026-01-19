@@ -113,36 +113,64 @@ export async function registerRoutes(
     res.json(history);
   });
 
+import { spawn } from "child_process";
+import path from "path";
+
+// ... existing code ...
+
   // === COACHING ROUTES ===
   app.post(api.coaching.analyze.path, requireAuth, async (req: any, res) => {
     try {
       const input = api.coaching.analyze.input.parse(req.body);
       
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.1",
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert dance coach. Analyze the user's performance and provide constructive, encouraging feedback. Keep it brief and actionable."
-          },
-          {
-            role: "user",
-            content: `
-              Dance Context: ${input.videoContext}
-              User Performance: ${input.userPerformance}
-              
-              Provide a JSON response with:
-              - feedback: overall assessment
-              - tips: array of 3 specific improvement tips
-              - encouragement: a short motivational phrase
-            `
-          }
-        ],
-        response_format: { type: "json_object" },
+      // Call Python analyzer
+      const pythonProcess = spawn('python3', [path.join(process.cwd(), 'server', 'motion_analyzer.py')]);
+      
+      let outputData = '';
+      pythonProcess.stdout.on('data', (data) => {
+        outputData += data.toString();
       });
 
-      const result = JSON.parse(response.choices[0].message.content || "{}");
-      res.json(result);
+      pythonProcess.stdin.write(JSON.stringify(input));
+      pythonProcess.stdin.end();
+
+      pythonProcess.on('close', async (code) => {
+        if (code !== 0) {
+          // Fallback to OpenAI if Python fails
+          const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+              {
+                role: "system",
+                content: "You are an expert dance coach. Analyze the user's performance and provide constructive, encouraging feedback. Keep it brief and actionable."
+              },
+              {
+                role: "user",
+                content: `
+                  Dance Context: ${input.videoContext}
+                  User Performance: ${input.userPerformance}
+                  
+                  Provide a JSON response with:
+                  - feedback: overall assessment
+                  - tips: array of 3 specific improvement tips
+                  - encouragement: a short motivational phrase
+                `
+              }
+            ],
+            response_format: { type: "json_object" },
+          });
+
+          const result = JSON.parse(response.choices[0].message.content || "{}");
+          return res.json(result);
+        }
+
+        try {
+          const result = JSON.parse(outputData);
+          res.json(result);
+        } catch (e) {
+          res.status(500).json({ message: "Failed to parse analyzer output" });
+        }
+      });
     } catch (err) {
       res.status(500).json({ message: "Failed to generate coaching feedback" });
     }
