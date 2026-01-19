@@ -9,6 +9,8 @@ import { registerChatRoutes } from "./replit_integrations/chat";
 import { registerImageRoutes } from "./replit_integrations/image";
 import { registerAudioRoutes } from "./replit_integrations/audio/routes";
 import { openai } from "./replit_integrations/audio/client";
+import { spawn } from "child_process";
+import path from "path";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -112,11 +114,6 @@ export async function registerRoutes(
     const history = await storage.getUserPracticeHistory(userId);
     res.json(history);
   });
-
-import { spawn } from "child_process";
-import path from "path";
-
-// ... existing code ...
 
   // === COACHING ROUTES ===
   app.post(api.coaching.analyze.path, requireAuth, async (req: any, res) => {
