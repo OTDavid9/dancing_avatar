@@ -19,7 +19,6 @@ export default function Practice() {
   const { mutate: finishPractice } = useFinishPractice();
   const { mutate: analyzeMotion } = useCoachingAnalysis();
   const [extractedMoves, setExtractedMoves] = useState<string[]>([]);
-
   const [isPlaying, setIsPlaying] = useState(false);
   const [score, setScore] = useState(0);
   const [feedback, setFeedback] = useState("Get ready to move!");
