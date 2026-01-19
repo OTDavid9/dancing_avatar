@@ -32,10 +32,30 @@ def calculate_pose_similarity(target_pose, user_pose):
 def analyze_motion(data):
     video_context = data.get('videoContext', '')
     user_performance = data.get('userPerformance', '')
-    
-    # In a real scenario, we'd pass keypoints here. 
-    # For now, we use the metrics provided by the frontend.
-    
+    requested_moves = data.get('requestedMoves', False)
+
+    # If user wants AI to extract moves from the context
+    if requested_moves:
+        # Mocking AI extraction of specific moves based on video context
+        if "Hip Hop" in video_context:
+            return {
+                "moves": ["Bounce", "Slide", "Cross-step", "Chest Pop"],
+                "focus": "rhythm and isolation",
+                "difficulty": "beginner"
+            }
+        elif "Salsa" in video_context:
+            return {
+                "moves": ["Basic Step", "Right Turn", "Cross Body Lead"],
+                "focus": "footwork and timing",
+                "difficulty": "intermediate"
+            }
+        else:
+            return {
+                "moves": ["Basic Step", "Wave", "Pivot Turn"],
+                "focus": "general flow",
+                "difficulty": "all-levels"
+            }
+
     accuracy = 0.0
     try:
         if "accuracy%" in user_performance:

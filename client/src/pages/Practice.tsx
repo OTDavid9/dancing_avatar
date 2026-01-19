@@ -18,8 +18,25 @@ export default function Practice() {
   const { mutate: startPractice } = useStartPractice();
   const { mutate: finishPractice } = useFinishPractice();
   const { mutate: analyzeMotion } = useCoachingAnalysis();
+  const [extractedMoves, setExtractedMoves] = useState<string[]>([]);
 
-  const [isPlaying, setIsPlaying] = useState(false);
+  useEffect(() => {
+    if (video) {
+      // AI "Choosing" moves based on the video
+      analyzeMotion({
+        videoContext: `User selecting ${video.title} for AI training. Extract key dance moves.`,
+        userPerformance: "Initial selection",
+        // @ts-ignore - added to support the new python logic
+        requestedMoves: true
+      }, {
+        onSuccess: (data: any) => {
+          if (data.moves) setExtractedMoves(data.moves);
+        }
+      });
+    }
+  }, [video, analyzeMotion]);
+
+  if (!video) return null;
   const [score, setScore] = useState(0);
   const [feedback, setFeedback] = useState("Get ready to move!");
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -147,6 +164,15 @@ export default function Practice() {
                 <div>
                   <div className="text-xs font-bold text-primary mb-1 uppercase tracking-wider">AI Coach</div>
                   <p className="text-white text-sm font-medium">{feedback}</p>
+                  {extractedMoves.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {extractedMoves.map(move => (
+                        <span key={move} className="text-[10px] bg-primary/20 text-primary-foreground px-2 py-0.5 rounded-full border border-primary/30">
+                          {move}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
