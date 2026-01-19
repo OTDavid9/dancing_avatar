@@ -11,6 +11,7 @@ import { registerAudioRoutes } from "./replit_integrations/audio/routes";
 import { openai } from "./replit_integrations/audio/client";
 import { spawn } from "child_process";
 import path from "path";
+import { insertDanceVideoSchema } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -74,6 +75,16 @@ export async function registerRoutes(
     const video = await storage.getVideo(id);
     if (!video) return res.status(404).json({ message: "Video not found" });
     res.json(video);
+  });
+
+  app.post("/api/videos", requireAuth, async (req: any, res) => {
+    try {
+      const input = insertDanceVideoSchema.parse(req.body);
+      const video = await storage.createVideo(input);
+      res.status(201).json(video);
+    } catch (err) {
+      res.status(400).json({ message: "Invalid input" });
+    }
   });
 
   // === PRACTICE ROUTES ===
