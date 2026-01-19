@@ -10,6 +10,7 @@ import Practice from "@/pages/Practice";
 import Dashboard from "@/pages/Dashboard";
 import AvatarPage from "@/pages/Avatar";
 import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   const { user, isLoading } = useAuth();
@@ -17,8 +18,19 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   if (isLoading) return <div className="h-screen flex items-center justify-center bg-background"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"/></div>;
   
   if (!user) {
-    window.location.href = "/api/login";
-    return null;
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-background p-4 text-center">
+        <h1 className="text-4xl font-black mb-4 bg-clip-text text-transparent bg-gradient-to-r from-primary to-secondary">
+          Ready to Dance?
+        </h1>
+        <p className="text-muted-foreground mb-8 max-w-md">
+          Join our community of dancers and start your AI-powered journey today.
+        </p>
+        <Button onClick={() => window.location.href = "/api/login"} size="lg" className="rounded-full px-8 h-12">
+          Log In with Replit
+        </Button>
+      </div>
+    );
   }
 
   return <Component />;

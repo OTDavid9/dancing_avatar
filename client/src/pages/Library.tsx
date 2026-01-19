@@ -168,7 +168,7 @@ export default function Library() {
         ) : (
           <div className="text-center py-24">
             <p className="text-xl text-muted-foreground">No videos found matching your filters.</p>
-            <Button variant="link" onClick={() => { setSearch(""); setDifficulty(undefined); setCategory(undefined); }} className="text-primary mt-2">
+            <Button variant="ghost" onClick={() => { setSearch(""); setDifficulty(undefined); setCategory(undefined); }} className="text-primary mt-2">
               Clear all filters
             </Button>
           </div>
