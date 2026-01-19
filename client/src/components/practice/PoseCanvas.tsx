@@ -53,9 +53,12 @@ export function PoseCanvas({ onPoseDetected, width = 640, height = 480 }: PoseCa
 
       const poses = await model.estimatePoses(video);
       
-      if (poses.length > 0) {
-        onPoseDetected(poses[0]);
-        drawSkeleton(poses[0], canvasRef.current.getContext('2d')!);
+      if (poses.length > 0 && canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          onPoseDetected(poses[0]);
+          drawSkeleton(poses[0], ctx);
+        }
       }
     }
     requestRef.current = requestAnimationFrame(detect);
