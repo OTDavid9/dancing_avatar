@@ -20,6 +20,14 @@ export default function Practice() {
   const { mutate: analyzeMotion } = useCoachingAnalysis();
   const [extractedMoves, setExtractedMoves] = useState<string[]>([]);
 
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [score, setScore] = useState(0);
+  const [feedback, setFeedback] = useState("Get ready to move!");
+  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [startTime, setStartTime] = useState<number>(0);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+
   useEffect(() => {
     if (video) {
       // AI "Choosing" moves based on the video
@@ -37,13 +45,6 @@ export default function Practice() {
   }, [video, analyzeMotion]);
 
   if (!video) return null;
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [score, setScore] = useState(0);
-  const [feedback, setFeedback] = useState("Get ready to move!");
-  const [sessionId, setSessionId] = useState<number | null>(null);
-  const [startTime, setStartTime] = useState<number>(0);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (videoId && !sessionId) {
