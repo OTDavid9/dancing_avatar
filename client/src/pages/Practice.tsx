@@ -108,6 +108,24 @@ export default function Practice() {
 
   if (!video) return null;
 
+  const getEmbedUrl = (url: string) => {
+    try {
+      if (url.includes('youtube.com/embed/')) return url;
+      let videoId = '';
+      if (url.includes('youtu.be/')) {
+        videoId = url.split('youtu.be/')[1].split(/[?#]/)[0];
+      } else if (url.includes('youtube.com/watch')) {
+        const urlParams = new URLSearchParams(new URL(url).search);
+        videoId = urlParams.get('v') || '';
+      } else if (url.includes('youtube.com/v/')) {
+        videoId = url.split('youtube.com/v/')[1].split(/[?#]/)[0];
+      }
+      return videoId ? `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1` : url;
+    } catch (e) {
+      return url;
+    }
+  };
+
   return (
     <div className="h-screen bg-black flex flex-col overflow-hidden">
       {/* Header */}
@@ -144,7 +162,7 @@ export default function Practice() {
         {/* Reference Video */}
         <div className="flex-1 bg-black relative flex items-center justify-center border-r border-white/10">
           <iframe
-            src={video.videoUrl.replace("watch?v=", "embed/") + "?autoplay=1&mute=1&enablejsapi=1"}
+            src={getEmbedUrl(video.videoUrl)}
             className="w-full h-full border-0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
