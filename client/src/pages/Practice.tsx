@@ -44,10 +44,8 @@ export default function Practice() {
     }
   }, [video, analyzeMotion]);
 
-  if (!video) return null;
-
   useEffect(() => {
-    if (videoId && !sessionId) {
+    if (videoId && !sessionId && video) {
       startPractice(videoId, {
         onSuccess: (data) => {
           setSessionId(data.id);
@@ -55,7 +53,13 @@ export default function Practice() {
         }
       });
     }
-  }, [videoId, sessionId, startPractice]);
+  }, [videoId, sessionId, startPractice, video]);
+
+  if (!video) return (
+    <div className="h-screen flex items-center justify-center bg-background">
+      <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    </div>
+  );
 
   const handlePoseDetected = (pose: poseDetection.Pose) => {
     if (!isPlaying) return;
