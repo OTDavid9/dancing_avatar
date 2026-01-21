@@ -60,20 +60,21 @@ export default function Practice() {
     </div>
   );
 
-  const handlePoseDetected = (pose: poseDetection.Pose) => {
+  const handlePoseDetected = (results: any) => {
     if (!isPlaying) return;
 
-    // SCORING LOGIC
-    const visibleKeypoints = pose.keypoints.filter(kp => (kp.score || 0) > 0.5).length;
-    const accuracy = Math.min(100, Math.round((visibleKeypoints / 17) * 100));
+    // MediaPipe Holistic detection logic
+    const poseLandmarks = results.poseLandmarks || [];
+    const visibleKeypoints = poseLandmarks.filter((kp: any) => (kp.visibility || 0) > 0.5).length;
+    const accuracy = Math.min(100, Math.round((visibleKeypoints / 33) * 100));
     
     setScore(prev => Math.max(prev, accuracy));
 
     // AI Feedback Trigger - significantly more frequent for "synchronization" feel
-    if (Math.random() > 0.90) {
+    if (Math.random() > 0.85) {
        analyzeMotion({
-         videoContext: `User practicing ${video?.title}`,
-         userPerformance: `Accuracy score ${accuracy}% with ${visibleKeypoints} visible joints. The user is attempting to synchronize with the moves.`
+         videoContext: `User practicing ${video?.title} with MediaPipe Holistic.`,
+         userPerformance: `Accuracy score ${accuracy}% with ${visibleKeypoints} visible pose joints. Hands and face landmarks are also being tracked for detail.`
        }, {
          onSuccess: (data) => {
            if (data.feedback) setFeedback(data.feedback);

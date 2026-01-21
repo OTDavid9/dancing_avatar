@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import * as poseDetection from '@tensorflow-models/pose-detection';
-import * as tf from '@tensorflow/tfjs-core';
-import '@tensorflow/tfjs-backend-webgl';
 import Webcam from 'react-webcam';
+import { Holistic } from '@mediapipe/holistic';
 
 interface PoseCanvasProps {
-  onPoseDetected: (pose: poseDetection.Pose) => void;
+  onPoseDetected: (pose: any) => void;
   width?: number;
   height?: number;
 }
@@ -13,87 +11,101 @@ interface PoseCanvasProps {
 export function PoseCanvas({ onPoseDetected, width = 640, height = 480 }: PoseCanvasProps) {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [model, setModel] = useState<poseDetection.PoseDetector | null>(null);
+  const [holistic, setHolistic] = useState<any>(null);
   const requestRef = useRef<number>();
 
   useEffect(() => {
-    const loadModel = async () => {
-      await tf.ready();
-      const detector = await poseDetection.createDetector(
-        poseDetection.SupportedModels.BlazePose,
-        {
-          runtime: 'tfjs',
-          modelType: 'lite', // 'lite', 'full', 'heavy'
-        }
-      );
-      setModel(detector);
+    let holisticInstance: any = null;
+    
+    // Use dynamic import or global access for Holistic to avoid SSR issues if any
+    const setupHolistic = async () => {
+      holisticInstance = new Holistic({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+        },
+      });
+
+      holisticInstance.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+        refineFaceLandmarks: true,
+      });
+
+      holisticInstance.onResults((results: any) => {
+        if (!canvasRef.current) return;
+        const ctx = canvasRef.current.getContext('2d');
+        if (!ctx) return;
+
+        drawResults(results, ctx);
+        onPoseDetected(results);
+      });
+
+      setHolistic(holisticInstance);
     };
-    loadModel();
+
+    setupHolistic();
+
     return () => {
-      if (model) {
-        model.dispose();
+      if (holisticInstance) {
+        holisticInstance.close();
       }
     };
   }, []);
 
-  const detect = async () => {
-    if (
-      typeof webcamRef.current !== "undefined" &&
-      webcamRef.current !== null &&
-      webcamRef.current.video?.readyState === 4 &&
-      model &&
-      canvasRef.current
-    ) {
-      const video = webcamRef.current.video;
-      const videoWidth = video.videoWidth;
-      const videoHeight = video.videoHeight;
+  const drawResults = (results: any, ctx: CanvasRenderingContext2D) => {
+    ctx.save();
+    ctx.clearRect(0, 0, width, height);
 
-      canvasRef.current.width = videoWidth;
-      canvasRef.current.height = videoHeight;
-
-      const poses = await model.estimatePoses(video);
-      
-      if (poses.length > 0 && canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-          onPoseDetected(poses[0]);
-          drawSkeleton(poses[0], ctx);
-        }
-      }
+    // Draw Pose
+    if (results.poseLandmarks) {
+      results.poseLandmarks.forEach((landmark: any) => {
+        ctx.beginPath();
+        ctx.arc(landmark.x * width, landmark.y * height, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#a855f7';
+        ctx.fill();
+      });
     }
-    requestRef.current = requestAnimationFrame(detect);
+
+    // Draw Hands
+    if (results.leftHandLandmarks) {
+      results.leftHandLandmarks.forEach((landmark: any) => {
+        ctx.beginPath();
+        ctx.arc(landmark.x * width, landmark.y * height, 2, 0, 2 * Math.PI);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fill();
+      });
+    }
+    if (results.rightHandLandmarks) {
+      results.rightHandLandmarks.forEach((landmark: any) => {
+        ctx.beginPath();
+        ctx.arc(landmark.x * width, landmark.y * height, 2, 0, 2 * Math.PI);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fill();
+      });
+    }
+
+    ctx.restore();
   };
 
   useEffect(() => {
-    if (model) {
+    const detect = async () => {
+      if (
+        webcamRef.current?.video?.readyState === 4 &&
+        holistic
+      ) {
+        const video = webcamRef.current.video;
+        await holistic.send({ image: video });
+      }
       requestRef.current = requestAnimationFrame(detect);
-    }
-    return () => {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
     };
-  }, [model]);
 
-  const drawSkeleton = (pose: poseDetection.Pose, ctx: CanvasRenderingContext2D) => {
-    ctx.clearRect(0, 0, width, height);
-    
-    // Draw keypoints
-    pose.keypoints.forEach((keypoint) => {
-      if ((keypoint.score || 0) > 0.5) {
-        ctx.beginPath();
-        ctx.arc(keypoint.x, keypoint.y, 6, 0, 2 * Math.PI);
-        ctx.fillStyle = '#a855f7'; // purple-500
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-    });
-
-    // Draw connections (simplified skeleton for Blazepose)
-    // Add logic here to draw lines between keypoints based on Blazepose topology
-  };
+    requestRef.current = requestAnimationFrame(detect);
+    return () => {
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+    };
+  }, [holistic]);
 
   return (
     <div className="relative rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
