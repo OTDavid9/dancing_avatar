@@ -20,6 +20,7 @@ export default function Practice() {
   const { mutate: analyzeMotion } = useCoachingAnalysis();
   const [extractedMoves, setExtractedMoves] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [ghostMode, setGhostMode] = useState(true);
   const [score, setScore] = useState(0);
   const [feedback, setFeedback] = useState("Get ready to move!");
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -144,6 +145,15 @@ export default function Practice() {
         </div>
         
         <div className="flex items-center gap-8">
+          <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Ghost Mode</span>
+            <button 
+              onClick={() => setGhostMode(!ghostMode)}
+              className={`w-8 h-4 rounded-full transition-colors relative ${ghostMode ? 'bg-primary' : 'bg-white/20'}`}
+            >
+              <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${ghostMode ? 'left-4.5' : 'left-0.5'}`} />
+            </button>
+          </div>
           <div className="text-center">
             <div className="text-xs text-muted-foreground uppercase tracking-wider font-bold">Score</div>
             <div className="text-2xl font-black text-primary font-mono">{score}</div>
@@ -176,6 +186,7 @@ export default function Practice() {
             onPoseDetected={handlePoseDetected}
             width={640}
             height={480}
+            ghostMode={ghostMode}
           />
           
           {/* AI Coach Overlay */}

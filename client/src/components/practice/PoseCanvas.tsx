@@ -6,9 +6,10 @@ interface PoseCanvasProps {
   onPoseDetected: (pose: any) => void;
   width?: number;
   height?: number;
+  ghostMode?: boolean;
 }
 
-export function PoseCanvas({ onPoseDetected, width = 640, height = 480 }: PoseCanvasProps) {
+export function PoseCanvas({ onPoseDetected, width = 640, height = 480, ghostMode = false }: PoseCanvasProps) {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [holistic, setHolistic] = useState<any>(null);
@@ -17,7 +18,6 @@ export function PoseCanvas({ onPoseDetected, width = 640, height = 480 }: PoseCa
   useEffect(() => {
     let holisticInstance: any = null;
     
-    // Use dynamic import or global access for Holistic to avoid SSR issues if any
     const setupHolistic = async () => {
       holisticInstance = new Holistic({
         locateFile: (file) => {
@@ -57,6 +57,38 @@ export function PoseCanvas({ onPoseDetected, width = 640, height = 480 }: PoseCa
   const drawResults = (results: any, ctx: CanvasRenderingContext2D) => {
     ctx.save();
     ctx.clearRect(0, 0, width, height);
+
+    // Draw Ghost Avatar if enabled (translucent guide)
+    if (ghostMode) {
+      const time = Date.now() * 0.002;
+      ctx.globalAlpha = 0.3;
+      // Draw a simulated "perfect" guide pose (moving stick figure)
+      const ghostJoints = [
+        { x: 0.5 + Math.sin(time) * 0.02, y: 0.3 + Math.cos(time * 0.5) * 0.01 }, // Head
+        { x: 0.4, y: 0.4 }, { x: 0.6, y: 0.4 }, // Shoulders
+        { x: 0.4, y: 0.7 }, { x: 0.6, y: 0.7 }, // Hips
+        { x: 0.3 + Math.sin(time * 1.5) * 0.1, y: 0.5 + Math.cos(time) * 0.1 }, // Left Hand
+        { x: 0.7 + Math.cos(time * 1.5) * 0.1, y: 0.5 + Math.sin(time) * 0.1 }, // Right Hand
+      ];
+      
+      ctx.fillStyle = '#3b82f6';
+      ghostJoints.forEach(j => {
+        ctx.beginPath();
+        ctx.arc(j.x * width, j.y * height, 8, 0, 2 * Math.PI);
+        ctx.fill();
+      });
+
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(ghostJoints[1].x * width, ghostJoints[1].y * height);
+      ctx.lineTo(ghostJoints[2].x * width, ghostJoints[2].y * height);
+      ctx.moveTo((ghostJoints[1].x + ghostJoints[2].x)/2 * width, ghostJoints[1].y * height);
+      ctx.lineTo((ghostJoints[1].x + ghostJoints[2].x)/2 * width, ghostJoints[3].y * height); // spine
+      ctx.stroke();
+      
+      ctx.globalAlpha = 1.0;
+    }
 
     // Draw Pose
     if (results.poseLandmarks) {
