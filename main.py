@@ -1,691 +1,520 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
+import os
+import json
+import math
+import asyncio
+import random
+from pathlib import Path
+from typing import Dict, List, Optional
+from datetime import datetime
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import math
-import random
-import time
-import asyncio
-import json
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from pydantic import BaseModel
+import uvicorn
 
-app = FastAPI(title="3D Dance Pose Generator")
+# Initialize FastAPI app
+app = FastAPI(
+    title="MJ Dance Avatar",
+    description="Real-time Michael Jackson avatar dance with music synchronization",
+    version="1.0.0"
+)
 
-# Static & templates
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/models", StaticFiles(directory="models"), name="models")
+
+# Setup templates
 templates = Jinja2Templates(directory="templates")
 
-# =========================
-# STYLE PROFILES
-# =========================
-STYLE_PROFILES = {
-    "afrobeats": {
-        "speed": 3.0,
-        "arm_amp": 0.8,
-        "leg_amp": 0.7,
-        "torso_sway": 0.25,
-        "bounce": 0.12,
-        "color": "#FF6B35"
+# Create directories if they don't exist
+Path("static").mkdir(exist_ok=True)
+Path("templates").mkdir(exist_ok=True)
+Path("music").mkdir(exist_ok=True)
+Path("models").mkdir(exist_ok=True)
+
+# Global state
+class DanceState:
+    def __init__(self):
+        self.connected_clients: List[WebSocket] = []
+        self.current_music: Optional[str] = None
+        self.music_playing: bool = False
+        self.current_time: float = 0.0
+        self.last_pose_time: float = 0.0
+        self.is_paused: bool = False
+        self.pause_time: float = 0.0
+        self.avatar_loaded: bool = False
+
+state = DanceState()
+
+# Data models
+class MusicTrack(BaseModel):
+    id: str
+    name: str
+    path: str
+    duration: Optional[float] = None
+
+class DancePose(BaseModel):
+    timestamp: float
+    joints: Dict[str, List[float]]
+
+# MJ Dance move definitions for humanoid skeleton (compatible with GLTF)
+MJ_DANCE_MOVES = {
+    "moonwalk": {
+        "description": "Michael's iconic backward slide",
+        "intensity": 0.8,
+        "speed": 2.0
     },
-    "hiphop": {
-        "speed": 2.5,
-        "arm_amp": 1.0,
-        "leg_amp": 0.9,
-        "torso_sway": 0.18,
-        "bounce": 0.06,
-        "color": "#004E89"
+    "crotch_grab": {
+        "description": "The famous grab move",
+        "intensity": 0.9,
+        "speed": 1.5
     },
-    "electro": {
-        "speed": 4.0,
-        "arm_amp": 0.6,
-        "leg_amp": 0.4,
-        "torso_sway": 0.12,
-        "bounce": 0.15,
-        "color": "#EF476F"
+    "spin": {
+        "description": "360-degree spin",
+        "intensity": 1.0,
+        "speed": 0.5
     },
-    "salsa": {
-        "speed": 2.0,
-        "arm_amp": 1.2,
-        "leg_amp": 1.0,
-        "torso_sway": 0.35,
-        "bounce": 0.1,
-        "color": "#06D6A0"
+    "kick": {
+        "description": "High kick move",
+        "intensity": 0.7,
+        "speed": 2.5
     },
-    "robot": {
-        "speed": 1.5,
-        "arm_amp": 0.3,
-        "leg_amp": 0.25,
-        "torso_sway": 0.05,
-        "bounce": 0.02,
-        "color": "#5A189A"
+    "lean": {
+        "description": "Anti-gravity lean",
+        "intensity": 0.6,
+        "speed": 1.0
+    },
+    "arm_wave": {
+        "description": "Smooth arm wave",
+        "intensity": 0.5,
+        "speed": 3.0
     }
 }
 
-# =========================
-# POSE GENERATION
-# =========================
-def generate_pose_3d(style: str, t: float):
-    profile = STYLE_PROFILES.get(style, STYLE_PROFILES["afrobeats"])
-
-    s = profile["speed"]
-    arm_amp = profile["arm_amp"]
-    leg_amp = profile["leg_amp"]
-    sway = profile["torso_sway"]
-    bounce = profile["bounce"]
-
-    noise = lambda v=0.02: random.uniform(-v, v)
-
-    # Core waves
-    arm_wave = math.sin(t * s)
-    leg_wave = math.sin(t * s + math.pi)
-    sway_wave = math.sin(t * s * 0.5)
-    bounce_wave = abs(math.sin(t * s))
-
-    # =========================
-    # BODY & HEAD
-    # =========================
-    body_x = sway_wave * sway
-    body_y = 1.2 + bounce_wave * bounce
-
-    head = {
-        "x": body_x * 0.5 + noise(),
-        "y": body_y + 0.5,
-        "z": 0
+def generate_mj_pose(move_name: str, timestamp: float, intensity: float = 1.0) -> Dict[str, List[float]]:
+    """Generate MJ-style dance pose for GLTF humanoid skeleton"""
+    t = timestamp % 2.0  # Loop every 2 seconds
+    phase = t * math.pi * 2
+    speed = MJ_DANCE_MOVES[move_name]["speed"] if move_name in MJ_DANCE_MOVES else 1.0
+    
+    # GLTF humanoid skeleton joint names (typical)
+    base_pose = {
+        # Core body
+        "hips": [0, 0, 0, 0, 0, 0],  # position x,y,z, rotation x,y,z
+        "spine": [0, 0, 0, 0, 0, 0],
+        "chest": [0, 0, 0, 0, 0, 0],
+        "upperChest": [0, 0, 0, 0, 0, 0],
+        "neck": [0, 0, 0, 0, 0, 0],
+        "head": [0, 0, 0, 0, 0, 0],
+        
+        # Left arm
+        "leftShoulder": [0, 0, 0, 0, 0, 0],
+        "leftUpperArm": [0, 0, 0, 0, 0, 0],
+        "leftLowerArm": [0, 0, 0, 0, 0, 0],
+        "leftHand": [0, 0, 0, 0, 0, 0],
+        
+        # Right arm
+        "rightShoulder": [0, 0, 0, 0, 0, 0],
+        "rightUpperArm": [0, 0, 0, 0, 0, 0],
+        "rightLowerArm": [0, 0, 0, 0, 0, 0],
+        "rightHand": [0, 0, 0, 0, 0, 0],
+        
+        # Left leg
+        "leftUpperLeg": [0, 0, 0, 0, 0, 0],
+        "leftLowerLeg": [0, 0, 0, 0, 0, 0],
+        "leftFoot": [0, 0, 0, 0, 0, 0],
+        "leftToes": [0, 0, 0, 0, 0, 0],
+        
+        # Right leg
+        "rightUpperLeg": [0, 0, 0, 0, 0, 0],
+        "rightLowerLeg": [0, 0, 0, 0, 0, 0],
+        "rightFoot": [0, 0, 0, 0, 0, 0],
+        "rightToes": [0, 0, 0, 0, 0, 0]
     }
+    
+    # Apply MJ dance move
+    if move_name == "moonwalk":
+        # Moonwalk: alternating leg slides
+        slide = math.sin(phase * speed) * 0.5 * intensity
+        base_pose["hips"][2] = slide * 0.2  # Move hips back/forward
+        base_pose["leftUpperLeg"][1] = math.sin(phase * speed + math.pi) * 45 * intensity  # Hip rotation
+        base_pose["rightUpperLeg"][1] = math.sin(phase * speed) * 45 * intensity
+        base_pose["leftLowerLeg"][1] = math.sin(phase * speed + math.pi) * 30 * intensity  # Knee bend
+        base_pose["rightLowerLeg"][1] = math.sin(phase * speed) * 30 * intensity
+        base_pose["leftFoot"][0] = math.sin(phase * speed + math.pi) * 25 * intensity  # Ankle tilt
+        base_pose["rightFoot"][0] = math.sin(phase * speed) * 25 * intensity
+        
+    elif move_name == "crotch_grab":
+        # Crotch grab: torso movement
+        grab = math.sin(phase * speed) * 0.8 * intensity
+        base_pose["hips"][0] = grab * 15  # Hip forward/back
+        base_pose["spine"][0] = -grab * 10  # Spine bend
+        base_pose["leftUpperArm"][0] = -grab * 60  # Arm forward
+        base_pose["rightUpperArm"][0] = -grab * 60
+        base_pose["leftLowerArm"][1] = grab * 90  # Elbow bend
+        base_pose["rightLowerArm"][1] = grab * 90
+        
+    elif move_name == "spin":
+        # Spin: rotating torso
+        spin_angle = (t * 180 * speed) % 360
+        base_pose["hips"][4] = spin_angle  # Rotate around Y axis
+        base_pose["spine"][4] = spin_angle * 0.7
+        base_pose["chest"][4] = spin_angle * 0.5
+        
+    elif move_name == "kick":
+        # Kick: high leg extension
+        kick = max(0, math.sin(phase * speed * 2)) * intensity
+        base_pose["rightUpperLeg"][0] = kick * 60  # Lift leg
+        base_pose["rightLowerLeg"][1] = -kick * 45  # Extend knee
+        base_pose["rightFoot"][1] = kick * 30  # Point toe
+        base_pose["hips"][0] = -kick * 10  # Lean back
+        
+    elif move_name == "lean":
+        # Lean: anti-gravity style
+        lean = math.sin(phase * speed) * 0.7 * intensity
+        base_pose["hips"][0] = lean * 25  # Lean forward/back
+        base_pose["spine"][0] = lean * 15
+        base_pose["leftFoot"][0] = -lean * 20  # Ankle adjustment
+        base_pose["rightFoot"][0] = -lean * 20
+        base_pose["neck"][0] = lean * 10  # Head tilt
+        
+    elif move_name == "arm_wave":
+        # Arm wave: smooth wave motion
+        wave_offset = phase * speed
+        base_pose["leftUpperArm"][2] = math.sin(wave_offset) * 45 * intensity  # Shoulder rotation
+        base_pose["rightUpperArm"][2] = math.sin(wave_offset + math.pi) * 45 * intensity
+        base_pose["leftLowerArm"][1] = math.sin(wave_offset + 0.5) * 60 * intensity  # Elbow
+        base_pose["rightLowerArm"][1] = math.sin(wave_offset + math.pi + 0.5) * 60 * intensity
+        base_pose["leftHand"][2] = math.sin(wave_offset + 1.0) * 30 * intensity  # Wrist
+        base_pose["rightHand"][2] = math.sin(wave_offset + math.pi + 1.0) * 30 * intensity
+    
+    return base_pose
 
-    body = {
-        "x": body_x,
-        "y": body_y,
-        "z": 0
-    }
+def generate_dance_sequence(duration: float = 300.0) -> List[DancePose]:
+    """Generate a sequence of MJ dance poses"""
+    poses = []
+    timestamp = 0.0
+    frame_rate = 30.0  # 30 FPS
+    frame_interval = 1.0 / frame_rate
+    
+    move_cycle = list(MJ_DANCE_MOVES.keys())
+    move_duration = 2.0  # Each move lasts 2 seconds
+    
+    while timestamp < duration:
+        move_index = int((timestamp / move_duration)) % len(move_cycle)
+        move_name = move_cycle[move_index]
+        
+        # Generate pose for current move
+        joints = generate_mj_pose(move_name, timestamp, MJ_DANCE_MOVES[move_name]["intensity"])
+        
+        poses.append(DancePose(
+            timestamp=timestamp,
+            joints=joints
+        ))
+        
+        timestamp += frame_interval
+    
+    return poses
 
-    # =========================
-    # ARM JOINTS
-    # =========================
-    def arm_chain(side=1):
-        shoulder_x = side * 0.45
-        shoulder_y = body_y + 0.2
+# Pre-generate dance poses
+DANCE_POSES = generate_dance_sequence(600)  # 10 minutes of dancing
 
-        shoulder_angle = arm_wave * arm_amp * side
-        elbow_angle = math.sin(t * s + math.pi / 4) * arm_amp * 1.2
-
-        upper_len = 0.35
-        lower_len = 0.3
-
-        elbow_x = shoulder_x + math.cos(shoulder_angle) * upper_len
-        elbow_y = shoulder_y - math.sin(shoulder_angle) * upper_len
-
-        hand_x = elbow_x + math.cos(shoulder_angle + elbow_angle) * lower_len
-        hand_y = elbow_y - math.sin(shoulder_angle + elbow_angle) * lower_len
-
-        return {
-            "shoulder": {"x": shoulder_x, "y": shoulder_y, "z": noise()},
-            "elbow": {"x": elbow_x, "y": elbow_y, "z": noise()},
-            "hand": {"x": hand_x, "y": hand_y, "z": noise()}
+def get_idle_pose() -> DancePose:
+    """Get neutral/standing pose"""
+    return DancePose(
+        timestamp=0.0,
+        joints={
+            "hips": [0, 0, 0, 0, 0, 0],
+            "spine": [0, 0, 0, 0, 0, 0],
+            "chest": [0, 0, 0, 0, 0, 0],
+            "upperChest": [0, 0, 0, 0, 0, 0],
+            "neck": [0, 0, 0, 0, 0, 0],
+            "head": [0, 0, 0, 0, 0, 0],
+            "leftShoulder": [0, 0, 0, 0, 0, 0],
+            "leftUpperArm": [0, 0, 0, 0, 0, 0],
+            "leftLowerArm": [0, 0, 0, 0, 0, 0],
+            "leftHand": [0, 0, 0, 0, 0, 0],
+            "rightShoulder": [0, 0, 0, 0, 0, 0],
+            "rightUpperArm": [0, 0, 0, 0, 0, 0],
+            "rightLowerArm": [0, 0, 0, 0, 0, 0],
+            "rightHand": [0, 0, 0, 0, 0, 0],
+            "leftUpperLeg": [0, 0, 0, 0, 0, 0],
+            "leftLowerLeg": [0, 0, 0, 0, 0, 0],
+            "leftFoot": [0, 0, 0, 0, 0, 0],
+            "leftToes": [0, 0, 0, 0, 0, 0],
+            "rightUpperLeg": [0, 0, 0, 0, 0, 0],
+            "rightLowerLeg": [0, 0, 0, 0, 0, 0],
+            "rightFoot": [0, 0, 0, 0, 0, 0],
+            "rightToes": [0, 0, 0, 0, 0, 0]
         }
+    )
 
-    # =========================
-    # LEG JOINTS
-    # =========================
-    def leg_chain(side=1):
-        hip_x = side * 0.25
-        hip_y = body_y - 0.4
+def get_pose_at_time(timestamp: float) -> DancePose:
+    """Get dance pose at specific timestamp"""
+    if not DANCE_POSES or timestamp < 0:
+        return get_idle_pose()
+    
+    frame_index = int(timestamp * 30)  # 30 FPS
+    if frame_index >= len(DANCE_POSES):
+        # Loop back to beginning
+        frame_index = frame_index % len(DANCE_POSES)
+        state.current_time = frame_index / 30.0
+    
+    return DANCE_POSES[frame_index]
 
-        hip_angle = leg_wave * leg_amp * side
-        knee_angle = abs(math.sin(t * s)) * leg_amp * 1.5
-
-        upper_len = 0.45
-        lower_len = 0.45
-
-        knee_x = hip_x + math.sin(hip_angle) * upper_len
-        knee_y = hip_y - math.cos(hip_angle) * upper_len
-
-        foot_x = knee_x + math.sin(hip_angle + knee_angle) * lower_len
-        foot_y = knee_y - math.cos(hip_angle + knee_angle) * lower_len
-
-        return {
-            "hip": {"x": hip_x, "y": hip_y, "z": 0},
-            "knee": {"x": knee_x, "y": knee_y, "z": 0},
-            "foot": {"x": foot_x, "y": foot_y, "z": 0}
-        }
-
-    # =========================
-    # FINAL POSE
-    # =========================
-    return {
-        "head": head,
-        "body": body,
-        "leftArm": arm_chain(-1),
-        "rightArm": arm_chain(1),
-        "leftLeg": leg_chain(-1),
-        "rightLeg": leg_chain(1),
-        "style": style,
-        "timestamp": t,
-        "color": profile["color"]
-    }
-
-# =========================
-# ROUTES
-# =========================
+# API Endpoints
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def serve_homepage(request: Request):
+    """Serve the main application page"""
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/api/styles")
-async def get_styles():
-    return list(STYLE_PROFILES.keys())
+@app.get("/api/music")
+async def get_music_tracks():
+    """Get list of available music files"""
+    music_files = []
+    music_dir = Path("music")
+    
+    if music_dir.exists():
+        for mp3_file in music_dir.glob("*.mp3"):
+            music_files.append({
+                "id": mp3_file.stem,
+                "name": mp3_file.stem.replace("_", " ").title(),
+                "path": f"/music/{mp3_file.name}",
+                "size": mp3_file.stat().st_size
+            })
+    
+    # If no music files found, create sample entries
+    if not music_files:
+        for i in range(1, 6):
+            music_files.append({
+                "id": f"file_{i}",
+                "name": f"Michael Jackson Track {i}",
+                "path": f"/music/file_{i}.mp3",
+                "size": 1024000
+            })
+    
+    return JSONResponse(content=music_files)
 
-# =========================
-# WEBSOCKETS
-# =========================
-@app.websocket("/ws/dance")
-async def dance_socket(ws: WebSocket):
-    await ws.accept()
+@app.get("/music/{filename}")
+async def serve_music_file(filename: str):
+    """Serve music files"""
+    music_path = Path("music") / filename
+    
+    if not music_path.exists():
+        # Return a placeholder if file doesn't exist
+        raise HTTPException(status_code=404, detail="Music file not found")
+    
+    return FileResponse(
+        path=music_path,
+        media_type="audio/mpeg",
+        filename=filename
+    )
 
-    try:
-        init = await ws.receive_json()
-        style = init.get("style", "afrobeats")
-        duration = init.get("duration", 10)
+@app.get("/models/Michele.glb")
+async def serve_avatar_model():
+    """Serve the GLB avatar model"""
+    model_path = Path("models") / "Michele.glb"
+    
+    if not model_path.exists():
+        # Create a placeholder or download the model
+        raise HTTPException(status_code=404, detail="Avatar model not found. Please place Michele.glb in the models/ directory.")
+    
+    return FileResponse(
+        path=model_path,
+        media_type="model/gltf-binary",
+        filename="Michele.glb"
+    )
 
-        start = time.time()
-        frame = 0
+@app.post("/api/play/{music_id}")
+async def play_music(music_id: str):
+    """Start playing specific music"""
+    state.current_music = music_id
+    state.music_playing = True
+    state.is_paused = False
+    state.current_time = 0.0
+    
+    # Notify all connected clients
+    for client in state.connected_clients:
+        try:
+            await client.send_json({
+                "type": "music_start",
+                "music_id": music_id,
+                "timestamp": datetime.now().isoformat()
+            })
+        except:
+            continue
+    
+    return {
+        "status": "playing",
+        "music_id": music_id,
+        "timestamp": state.current_time
+    }
 
-        while time.time() - start < duration:
-            t = time.time() - start
-            pose = generate_pose_3d(style, t)
-            pose["frame"] = frame
+@app.post("/api/pause")
+async def pause_music():
+    """Pause music and dancing"""
+    state.music_playing = False
+    state.is_paused = True
+    state.pause_time = state.current_time
+    
+    # Send pause notification
+    for client in state.connected_clients:
+        try:
+            await client.send_json({
+                "type": "music_pause",
+                "timestamp": datetime.now().isoformat()
+            })
+        except:
+            continue
+    
+    return {
+        "status": "paused",
+        "pause_time": state.pause_time
+    }
 
-            await ws.send_json(pose)
-            frame += 1
-            await asyncio.sleep(1 / 30)
+@app.post("/api/resume")
+async def resume_music():
+    """Resume music and dancing"""
+    state.music_playing = True
+    state.is_paused = False
+    
+    # Send resume notification
+    for client in state.connected_clients:
+        try:
+            await client.send_json({
+                "type": "music_resume",
+                "timestamp": datetime.now().isoformat()
+            })
+        except:
+            continue
+    
+    return {
+        "status": "resumed",
+        "resume_from": state.pause_time
+    }
 
-        await ws.send_json({"status": "complete"})
-        await ws.close()
+@app.post("/api/reset")
+async def reset_dance():
+    """Reset avatar to idle pose"""
+    state.music_playing = False
+    state.current_music = None
+    state.current_time = 0.0
+    state.is_paused = False
+    
+    # Send reset notification
+    for client in state.connected_clients:
+        try:
+            await client.send_json({
+                "type": "reset",
+                "pose": "idle",
+                "timestamp": datetime.now().isoformat()
+            })
+        except:
+            continue
+    
+    return {"status": "reset", "pose": "idle"}
 
-    except WebSocketDisconnect:
-        pass
+@app.get("/api/status")
+async def get_status():
+    """Get current dance status"""
+    return {
+        "music_playing": state.music_playing,
+        "current_music": state.current_music,
+        "current_time": state.current_time,
+        "is_paused": state.is_paused,
+        "connected_clients": len(state.connected_clients),
+        "avatar_loaded": state.avatar_loaded
+    }
 
-@app.websocket("/ws/dance/stream")
-async def dance_stream(ws: WebSocket):
-    await ws.accept()
-    style = "afrobeats"
-    start = time.time()
-
-    try:
-        while True:
-            try:
-                msg = await asyncio.wait_for(ws.receive_json(), timeout=0.01)
-                style = msg.get("style", style)
-            except:
-                pass
-
-            t = time.time() - start
-            pose = generate_pose_3d(style, t)
-            await ws.send_json(pose)
-            await asyncio.sleep(1 / 30)
-
-    except WebSocketDisconnect:
-        pass
-
-# from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-# from fastapi.responses import HTMLResponse, FileResponse
-# from fastapi.staticfiles import StaticFiles
-# from fastapi.templating import Jinja2Templates
-# import math
-# import random
-# import time
-# import asyncio
-# from typing import Dict, Any
-# import json
-# import os
-
-# app = FastAPI(title="3D Dance Pose Generator")
-
-# # Mount static files directory
-# app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# # Setup templates
-# templates = Jinja2Templates(directory="templates")
-
-# # Define style profiles
-# STYLE_PROFILES = {
-#     "afrobeats": {
-#         "speed": 3.0,
-#         "arm_amp": 0.4,
-#         "leg_amp": 0.3,
-#         "torso_sway": 0.2,
-#         "bounce": 0.1,
-#         "color": "#FF6B35"  # Orange
-#     },
-#     "hiphop": {
-#         "speed": 2.5,
-#         "arm_amp": 0.5,
-#         "leg_amp": 0.4,
-#         "torso_sway": 0.15,
-#         "bounce": 0.05,
-#         "color": "#004E89"  # Blue
-#     },
-#     "electro": {
-#         "speed": 4.0,
-#         "arm_amp": 0.3,
-#         "leg_amp": 0.2,
-#         "torso_sway": 0.1,
-#         "bounce": 0.15,
-#         "color": "#EF476F"  # Pink
-#     },
-#     "salsa": {
-#         "speed": 2.0,
-#         "arm_amp": 0.6,
-#         "leg_amp": 0.5,
-#         "torso_sway": 0.3,
-#         "bounce": 0.08,
-#         "color": "#06D6A0"  # Green
-#     },
-#     "robot": {
-#         "speed": 1.5,
-#         "arm_amp": 0.2,
-#         "leg_amp": 0.1,
-#         "torso_sway": 0.05,
-#         "bounce": 0.01,
-#         "color": "#5A189A"  # Purple
-#     }
-# }
-
-# def generate_pose_3d(style: str, t: float):
-#     profile = STYLE_PROFILES.get(style, STYLE_PROFILES["afrobeats"])
-
-#     s = profile["speed"]
-#     arm_amp = profile["arm_amp"]
-#     leg_amp = profile["leg_amp"]
-#     sway = profile["torso_sway"]
-#     bounce = profile["bounce"]
-
-#     # Base oscillators
-#     arm_wave = math.sin(t * s)
-#     leg_wave = math.sin(t * s + math.pi)
-#     sway_wave = math.sin(t * s * 0.5)
-#     bounce_wave = abs(math.sin(t * s))
-
-#     # Small procedural noise
-#     noise = lambda: random.uniform(-0.02, 0.02)
-
-#     return {
-#         "head": {
-#             "x": sway_wave * sway * 0.5 + noise(),
-#             "y": 1.7 + bounce_wave * bounce,
-#             "z": 0
-#         },
-#         "body": {
-#             "x": sway_wave * sway,
-#             "y": 1.2 + bounce_wave * bounce * 0.6,
-#             "z": 0
-#         },
-#         "leftArm": {
-#             "x": -0.45,
-#             "y": 1.3,
-#             "z": arm_wave * arm_amp + noise()
-#         },
-#         "rightArm": {
-#             "x": 0.45,
-#             "y": 1.3,
-#             "z": -arm_wave * arm_amp + noise()
-#         },
-#         "leftLeg": {
-#             "x": -0.25,
-#             "y": 0.5 + bounce_wave * bounce * 0.4,
-#             "z": -leg_wave * leg_amp
-#         },
-#         "rightLeg": {
-#             "x": 0.25,
-#             "y": 0.5 + bounce_wave * bounce * 0.4,
-#             "z": leg_wave * leg_amp
-#         },
-#         "style": style,
-#         "timestamp": t,
-#         "color": profile["color"]
-#     }
-
-# @app.get("/", response_class=HTMLResponse)
-# async def read_root(request: Request):
-#     """Serve the main HTML page"""
-#     return templates.TemplateResponse("index.html", {"request": request})
-
-# @app.get("/api/styles")
-# async def get_styles():
-#     """Get available dance styles"""
-#     return list(STYLE_PROFILES.keys())
-
-# @app.get("/api/style/{style_name}")
-# async def get_style_profile(style_name: str):
-#     """Get profile for a specific style"""
-#     profile = STYLE_PROFILES.get(style_name)
-#     if not profile:
-#         return {"error": "Style not found"}
-#     return profile
-
-# @app.websocket("/ws/dance")
-# async def dance_socket(ws: WebSocket):
-#     await ws.accept()
-
+# @app.websocket("/ws")
+# async def websocket_endpoint(websocket: WebSocket):
+#     """WebSocket endpoint for real-time pose streaming"""
+#     await websocket.accept()
+#     state.connected_clients.append(websocket)
+    
 #     try:
-#         init = await ws.receive_json()
-#         style = init.get("style", "afrobeats")
-#         duration = init.get("duration", 10)
-        
-#         print(f"Starting dance session: style={style}, duration={duration}s")
-
-#         start_time = time.time()
-#         frame_count = 0
-
-#         while time.time() - start_time < duration:
-#             elapsed = time.time() - start_time
-#             pose = generate_pose_3d(style, elapsed)
-#             pose["frame"] = frame_count
-            
-#             await ws.send_json(pose)
-#             frame_count += 1
-#             await asyncio.sleep(1 / 30)
-
-#         await ws.send_json({
-#             "status": "complete",
-#             "frames_sent": frame_count,
-#             "duration": duration
+#         # Send initial connection info
+#         await websocket.send_json({
+#             "type": "connected",
+#             "message": "Connected to MJ Dance Server",
+#             "timestamp": datetime.now().isoformat()
 #         })
-#         await ws.close()
-
-#     except WebSocketDisconnect:
-#         print("Client disconnected")
-#     except Exception as e:
-#         print(f"Error in dance socket: {e}")
-#         try:
-#             await ws.close()
-#         except:
-#             pass
-
-# @app.websocket("/ws/dance/stream")
-# async def dance_stream(ws: WebSocket):
-#     """Stream poses continuously until client disconnects"""
-#     await ws.accept()
-    
-#     style = "afrobeats"
-#     start_time = time.time()
-    
-#     try:
+        
+#         # Send initial idle pose
+#         idle_pose = get_idle_pose()
+#         await websocket.send_json(idle_pose.dict())
+        
 #         while True:
-#             # Check for style change messages from client
+#             # Wait for client to request pose
 #             try:
-#                 data = await asyncio.wait_for(ws.receive_json(), timeout=0.01)
-#                 if "style" in data:
-#                     style = data["style"]
-#                     print(f"Style changed to: {style}")
-#             except (asyncio.TimeoutError, json.JSONDecodeError):
-#                 pass
+#                 data = await asyncio.wait_for(websocket.receive_text(), timeout=0.1)
+#                 if data == "get_pose":
+#                     if state.music_playing and not state.is_paused:
+#                         pose = get_pose_at_time(state.current_time)
+#                         await websocket.send_json(pose.dict())
+#                         state.current_time += 0.033  # Increment by one frame (30 FPS)
+#                     elif state.is_paused:
+#                         # Send paused pose (last pose before pause)
+#                         pose = get_pose_at_time(state.pause_time)
+#                         await websocket.send_json(pose.dict())
+#                     else:
+#                         # Send idle pose
+#                         idle_pose = get_idle_pose()
+#                         await websocket.send_json(idle_pose.dict())
+#             except asyncio.TimeoutError:
+#                 # Keep connection alive with ping
+#                 try:
+#                     await websocket.send_json({
+#                         "type": "ping",
+#                         "timestamp": datetime.now().isoformat()
+#                     })
+#                 except:
+#                     break
             
-#             elapsed = time.time() - start_time
-#             pose = generate_pose_3d(style, elapsed)
-#             await ws.send_json(pose)
-#             await asyncio.sleep(1 / 30)
+#             # Small delay to control frame rate
+#             await asyncio.sleep(0.033)  # ~30 FPS
             
 #     except WebSocketDisconnect:
-#         print("Stream client disconnected")
-# import math
-# import random
-# import time
-# import asyncio
-# from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-# from fastapi.templating import Jinja2Templates
-# from fastapi.responses import HTMLResponse
-# from fastapi.staticfiles import StaticFiles
-# import asyncio, time, math
+#         state.connected_clients.remove(websocket)
+#     except Exception as e:
+#         print(f"WebSocket error: {e}")
+#         state.connected_clients.remove(websocket)
 
-# app = FastAPI()
+@app.on_event("startup")
+async def startup_event():
+    """Initialize on startup"""
+    print("\n" + "="*60)
+    print("🎭 MICHAEL JACKSON DANCE AVATAR SERVER 🕺")
+    print("="*60)
+    print("\nServer is running!")
+    print(f"\nAccess the application at: http://localhost:8000")
+    print("\nRequirements:")
+    print("  • Place 'Michele.glb' in the 'models/' directory")
+    print("  • Place MP3 files in the 'music/' directory")
+    print("\nEndpoints:")
+    print("  • GET  /              - Main application")
+    print("  • GET  /api/music     - List music tracks")
+    print("  • GET  /models/Michele.glb - Avatar model")
+    print("  • WS   /ws            - Real-time pose streaming")
+    print("\n" + "="*60)
 
-# # Templates
-# templates = Jinja2Templates(directory="templates")
-
-# # Static files (JS, CSS)
-# app.mount("/static", StaticFiles(directory="static"), name="static")
-
-
-# class SmoothRandom:
-#     """
-#     Generates smooth random values over time
-#     (used in animation & robotics)
-#     """
-#     def __init__(self, speed=0.05):
-#         self.value = random.uniform(-1, 1)
-#         self.target = random.uniform(-1, 1)
-#         self.speed = speed
-
-#     def update(self):
-#         if abs(self.value - self.target) < 0.05:
-#             self.target = random.uniform(-1, 1)
-#         self.value += (self.target - self.value) * self.speed
-#         return self.value
-
-
-# def create_motion_profile(style):
-#     return {
-#         "arm": SmoothRandom(speed=0.06),
-#         "leg": SmoothRandom(speed=0.04),
-#         "body": SmoothRandom(speed=0.03),
-#         "tempo": 0.12 if style == "afrobeats" else 0.18 if style == "hiphop" else 0.25
-#     }
-
-
-# def generate_pose(style, frame, motion):
-#     center_x = 180
-#     center_y = 160
-
-#     tempo = motion["tempo"]
-#     arm_wave = math.sin(frame * tempo)
-#     leg_wave = math.sin(frame * tempo * 0.8)
-
-#     arm_rand = motion["arm"].update() * 18
-#     leg_rand = motion["leg"].update() * 12
-#     body_rand = motion["body"].update() * 8
-
-#     return {
-#         "head": {
-#             "x": center_x + body_rand * 0.3,
-#             "y": center_y - 80 + body_rand * 0.5
-#         },
-#         "body": {
-#             "x": center_x + body_rand,
-#             "y": center_y
-#         },
-#         "leftHand": {
-#             "x": center_x - 40 + arm_rand,
-#             "y": center_y - 20 + arm_wave * 25
-#         },
-#         "rightHand": {
-#             "x": center_x + 40 - arm_rand,
-#             "y": center_y - 20 - arm_wave * 25
-#         },
-#         "leftFoot": {
-#             "x": center_x - 20,
-#             "y": center_y + 90 + leg_wave * 15 + leg_rand
-#         },
-#         "rightFoot": {
-#             "x": center_x + 20,
-#             "y": center_y + 90 - leg_wave * 15 - leg_rand
-#         }
-#     }
-
-# @app.get("/")
-# async def root():   
-#     return {"message": "Dance Motion Server is running."}
-
-# @app.get("/dance", response_class=HTMLResponse)
-# async def index(request: Request):
-#     return templates.TemplateResponse(
-#         "index.html",
-#         {"request": request}
-#     )
-
-
-# @app.route("/health")
-# async def health_check():
-#     return {"status": "ok"}
-
-# # @app.websocket("/ws/dance")
-# # async def dance_socket(websocket: WebSocket):
-# #     await websocket.accept()
-
-# #     try:
-# #         init = await websocket.receive_json()
-# #         style = init.get("style", "afrobeats")
-# #         duration = init.get("duration", 300)  # seconds (5 mins default)
-
-# #         start_time = time.time()
-# #         frame = 0
-# #         motion = create_motion_profile(style)
-
-# #         while True:
-# #             if time.time() - start_time > duration:
-# #                 break
-
-# #             pose = generate_pose(style, frame, motion)
-
-# #             await websocket.send_json({
-# #                 "style": style,
-# #                 "frame": frame,
-# #                 "timestamp": time.time(),
-# #                 "pose": pose
-# #             })
-
-# #             frame += 1
-# #             await asyncio.sleep(1 / 30)  # 30 FPS
-
-# #         await websocket.close()
-
-# #     except WebSocketDisconnect:
-# #         print("Client disconnected")
-
-
-# # def generate_pose_3d(style, frame):
-# #     amp = 0.5 if style == "electronic" else 0.3 if style == "hiphop" else 0.2
-# #     speed = 0.15 if style == "electronic" else 0.1
-
-# #     swing = math.sin(frame * speed) * amp
-
-# #     return {
-# #         "head": {"x": 0, "y": 1.7, "z": 0},
-# #         "body": {"x": 0, "y": 1.2, "z": 0},
-
-# #         "leftArm": {"x": -0.5, "y": 1.3, "z": swing},
-# #         "rightArm": {"x": 0.5, "y": 1.3, "z": -swing},
-
-# #         "leftLeg": {"x": -0.3, "y": 0.5, "z": -swing},
-# #         "rightLeg": {"x": 0.3, "y": 0.5, "z": swing},
-# #     }
-
-# STYLE_PROFILES = {
-#     "afrobeats": {
-#         "arm_amp": 0.25,
-#         "leg_amp": 0.2,
-#         "torso_sway": 0.1,
-#         "bounce": 0.08,
-#         "speed": 1.5,
-#     },
-#     "hiphop": {
-#         "arm_amp": 0.35,
-#         "leg_amp": 0.25,
-#         "torso_sway": 0.15,
-#         "bounce": 0.05,
-#         "speed": 1.2,
-#     },
-#     "electronic": {
-#         "arm_amp": 0.5,
-#         "leg_amp": 0.35,
-#         "torso_sway": 0.2,
-#         "bounce": 0.12,
-#         "speed": 2.0,
-#     }
-# }
-
-
-# def generate_pose_3d(style: str, t: float):
-#     profile = STYLE_PROFILES.get(style, STYLE_PROFILES["afrobeats"])
-
-#     s = profile["speed"]
-#     arm_amp = profile["arm_amp"]
-#     leg_amp = profile["leg_amp"]
-#     sway = profile["torso_sway"]
-#     bounce = profile["bounce"]
-
-#     # Base oscillators
-#     arm_wave = math.sin(t * s)
-#     leg_wave = math.sin(t * s + math.pi)
-#     sway_wave = math.sin(t * s * 0.5)
-#     bounce_wave = abs(math.sin(t * s))
-
-#     # Small procedural noise (keeps it organic)
-#     noise = lambda: random.uniform(-0.02, 0.02)
-
-#     return {
-#         # Head subtly follows torso + bounce
-#         "head": {
-#             "x": sway_wave * sway * 0.5 + noise(),
-#             "y": 1.7 + bounce_wave * bounce,
-#             "z": 0
-#         },
-
-#         # Torso sways and bounces
-#         "body": {
-#             "x": sway_wave * sway,
-#             "y": 1.2 + bounce_wave * bounce * 0.6,
-#             "z": 0
-#         },
-
-#         # Arms swing with phase offset
-#         "leftArm": {
-#             "x": -0.45,
-#             "y": 1.3,
-#             "z": arm_wave * arm_amp + noise()
-#         },
-#         "rightArm": {
-#             "x": 0.45,
-#             "y": 1.3,
-#             "z": -arm_wave * arm_amp + noise()
-#         },
-
-#         # Legs counterbalance arms
-#         "leftLeg": {
-#             "x": -0.25,
-#             "y": 0.5 + bounce_wave * bounce * 0.4,
-#             "z": -leg_wave * leg_amp
-#         },
-#         "rightLeg": {
-#             "x": 0.25,
-#             "y": 0.5 + bounce_wave * bounce * 0.4,
-#             "z": leg_wave * leg_amp
-#         },
-#     }
-
-
-# @app.websocket("/ws/dance")
-# async def dance_socket(ws: WebSocket):
-#     await ws.accept()
-
-#     try:
-#         init = await ws.receive_json()
-#         style = init.get("style", "afrobeats")
-#         duration = init.get("duration", 10)
-
-#         start = time.time()
-
-
-#         while time.time() - start < duration:
-#             t = time.time() - start
-            
-#             pose = generate_pose_3d(style, t)
-
-#             await ws.send_json(pose)
-
-#             await asyncio.sleep(1 / 30)
-
-#         await ws.close()
-
-#     except WebSocketDisconnect:
-#         pass
-#         print("Client disconnected")
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
